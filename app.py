@@ -132,34 +132,45 @@ def marcar_como_vista(url):
 
 def evaluar_con_llm(descripcion):
     prompt = f"""
-    Eres un analista inmobiliario. Lee la siguiente descripción de una propiedad en renta.
-    Tu objetivo es determinar si es viable para un inquilino que NO tiene aval, NO tiene empleo fijo (pero tiene liquidez para pagar meses por adelantado), y NO puede pagar póliza jurídica. 
-    Descarta inmediatamente si exige póliza jurídica, aval forzoso o menciona agencias inmobiliarias estrictas. 
-    Premia si dice "trato directo" o es negociable.
-    
-    Descripción: "{descripcion}"
-    
-    Responde ÚNICAMENTE con un JSON válido con dos claves: "viable" (booleano) y "razon" (texto corto de 1 línea). No añadas formato markdown ni texto fuera del JSON.
+    Eres un auditor inmobiliario implacable. Analiza la siguiente descripción de una propiedad en renta y determina su viabilidad. 
+    El inquilino potencial cuenta con liquidez para pagar 6 meses por adelantado, pero carece de aval y no aceptará trámites con póliza jurídica o inmobiliarias.
+
+    REGLAS DE RECHAZO INMEDIATO (viable: false):
+    - Exigencia explícita de: "póliza jurídica", "poliza", "aval", "fiador", "obligado solidario", "propiedad en garantía".
+    - Jerga de agencias intermediarias: "inmobiliaria", "asesor", "comisión", "honorarios", "buro de crédito", "investigación".
+    - Restricciones de estilo de vida: "solo señoritas", "estudiantes", "no visitas".
+
+    REGLAS DE APROBACIÓN (viable: true):
+    - Mención explícita de: "trato directo", "trato con dueño", "sin aval".
+    - Textos neutrales que NO contengan NINGUNA de las palabras de rechazo absoluto (espacios donde el pago por adelantado sirve como llave de negociación).
+
+    Devuelve ÚNICAMENTE un JSON válido con este formato exacto: {{"viable": true/false, "razon": "Justificación de 10 palabras máximo"}}. No incluyas markdown (```json), ni texto introductorio.
+
+    Descripción a evaluar:
+    "{descripcion}"
     """
     
     try:
-        # Utilizamos un modelo gratuito de alta capacidad
         response = llm_client.chat.completions.create(
             model="meta-llama/llama-3.1-8b-instruct:free",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.1
+            temperature=0.0 # Reducido a 0 para máxima consistencia y evitar alucinaciones
         )
         resultado_crudo = response.choices[0].message.content.strip()
         
-        # Limpieza por si el modelo añade backticks a pesar de las instrucciones
-        if resultado_crudo.startswith("```json"):
-            resultado_crudo = resultado_crudo[7:-3]
+        # Limpieza defensiva en caso de que el LLM ignore la instrucción de no usar markdown
+        if resultado_crudo.startswith("```"):
+            resultado_crudo = resultado_crudo.replace("```json", "").replace("```", "").strip()
             
         evaluacion = json.loads(resultado_crudo)
         return evaluacion.get("viable", False), evaluacion.get("razon", "Evaluación fallida")
+        
+    except json.JSONDecodeError:
+        print(f"Error de parseo JSON. El LLM devolvió: {resultado_crudo}")
+        return False, "Error de formato LLM"
     except Exception as e:
-        print(f"Error en OpenRouter LLM: {e}")
-        return False, "Error de API"
+        print(f"Error en OpenRouter: {e}")
+        return False, "Error de conexión"
 
 def buscar_propiedades():
     print("Iniciando patrullaje con Playwright...")
