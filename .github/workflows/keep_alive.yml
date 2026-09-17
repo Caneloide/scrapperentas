@@ -13,5 +13,5 @@ jobs:
     steps:
       - name: Hacer ping a la URL de Render
         run: |
-          curl -s https://scraper-rentas.onrender.com
-          echo "Ping enviado a Render en verguiza"
+          curl -s https://scrapperentass.onrender.com/
+          echo "Ping enviado a Render"
