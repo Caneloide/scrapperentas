@@ -1,2 +1,0 @@
-# scrapperentas
-SCRAPPER RENTAS
