@@ -111,6 +111,8 @@ def enviar_telegram(mensaje):
         return
     url_tel = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     res = requests.post(url_tel, data={"chat_id": CHAT_ID, "text": mensaje})
+    if res.status_code != 200:
+        print(f"Fallo al enviar mensaje a Telegram: {res.text}")
     
     # Esto te mostrará el error exacto en los logs de Render si Telegram rechaza el mensaje
     if res.status_code != 200:
@@ -157,58 +159,63 @@ def evaluar_con_llm(descripcion):
             temperature=0.0 # Reducido a 0 para máxima consistencia y evitar alucinaciones
         )
         resultado_crudo = response.choices[0].message.content.strip()
-        
-        # Limpieza defensiva en caso de que el LLM ignore la instrucción de no usar markdown
         if resultado_crudo.startswith("```"):
-            resultado_crudo = resultado_crudo.replace("```json", "").replace("```", "").strip()
-            
-        evaluacion = json.loads(resultado_crudo)
-        return evaluacion.get("viable", False), evaluacion.get("razon", "Evaluación fallida")
+            resultado_crudo = resultado_crudo.replace("```json", "").strip()
+            evaluacion = json.loads(resultado_crudo)
+            return evaluacion.get("viable", False), evaluacion.get("razon", "Evaluacion fallida")
+        except Exception as e:
+            print(f"Error en Openrouter: {e}")
+            return False, "Error de API"
         
-    except json.JSONDecodeError:
-        print(f"Error de parseo JSON. El LLM devolvió: {resultado_crudo}")
-        return False, "Error de formato LLM"
-    except Exception as e:
-        print(f"Error en OpenRouter: {e}")
-        return False, "Error de conexión"
-
-def buscar_propiedades():
-    print("Iniciando patrullaje con Playwright...")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        
-        for url in ZONAS_OBJETIVO:
+        def buscar_propiedades():
+            print("--- Iniciando patrullaje AUTOMÁTICO con Playwright ---")
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True), args=['--no-sandbox', '--disable-setuid-sandbox'])
+                    context = browser.new_context(
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    )
+                    page = context.new.page ()
+        
+                    for url in ZONAS_OBJETIVO:
+                        print(f"Escaneando URL: {url}")
+                        page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 # Extraemos los enlaces de las tarjetas
-                enlaces = page.eval_on_selector_all("a.ui-search-link", "elements => elements.map(e => e.href)")
+                        enlaces = page.eval_on_selector_all(
+                            "a.ui-search-link", 
+                            "elements => elements.map(e => e.href)"
+                        )
+                        print(f"Enlaces encontrados:{len(enlaces)}")
                 
-                for link in enlaces:
-                    link_limpio = link.split('#')[0]
+                        for link in enlaces[:3]:
+                            link_limpio = link.split('#')[0].split('?')[0]
                     
-                    if url_ya_vista(link_limpio):
-                        continue
+                            if url_ya_vista(link_limpio):
+                                continue
                         
-                    # Navegamos a la propiedad individual para leer la descripción completa
-                    page.goto(link_limpio, wait_until="domcontentloaded", timeout=20000)
+                            print (f"Analizando propiedad nueva: {link_impio}")
+                            page.goto(link_limpio, wait_until="domcontentloaded", timeout=20000)
+                        
+                            if page.locator("p.ui-pdp-description__content").count() > 0:
+                                descripcion = "\n".join(page.locator("p.ui-pdp-description__content").all_inner_texts())
+                            else:
+                                descripcion = "Sin descripcion visible."
                     
-                    # Extraer el texto de la descripción (selector específico de ML, debes adaptarlo para Lamudi/Inmuebles24)
-                    descripcion = page.locator("p.ui-pdp-description__content").inner_text() if page.locator("p.ui-pdp-description__content").count() > 0 else "Sin descripción"
+                            es_viable, razon = evaluar_con_llm(descripcion)
+                            print(f"Resultado IA - Viable: {es_viable} | Razón: {razon}")
                     
-                    es_viable, razon = evaluar_con_llm(descripcion)
+                            if es_viable:
+                               zona_nombre = url.split('/')[-2].replace('-', ' ').title()
+                               mensaje = f"✅ Propiedad Viable\n📍 {zona_nombre}\n🧠 Razón: {razon}\n🔗 {link_limpio}"
+                               enviar_telegram(mensaje)
                     
-                    if es_viable:
-                        zona_nombre = url.split('/')[-2].replace('-', ' ').title()
-                        mensaje = f"✅ Propiedad Viable\n📍 {zona_nombre}\n🧠 Razón: {razon}\n🔗 {link_limpio}"
-                        enviar_telegram(mensaje)
-                    
-                    marcar_como_vista(link_limpio)
-                    
-            except Exception as e:
-                print(f"Error procesando zona {url}: {e}")
+                            marcar_como_vista(link_limpio)
                 
-        browser.close()
+                    context.close()
+                    browser.close()
+                print("--- PATRULLAJE FINALIZADO CON ÉXITO ---") 
+            except Exception as e:
+                print(f"Error CRÍTICO en buscar_propiedades: {e}")
 
 # --- RUTAS FLASK ---
 @app.route('/')
@@ -217,8 +224,10 @@ def home():
 
 @app.route('/prueba')
 def prueba_telegram():
-    enviar_telegram("🤖 Ping de diagnóstico: Telegram conectado.")
-    return "Mensaje enviado. Revisa los logs en Render si no llega."
+    enviar_telegram("🤖 Ping de diagnóstico: Telegram conectado correctamente.")
+    import threading
+    threading.Thread(target=buscar_propiedades).start()
+    return "PRUEBA LANZADA. Revisa los logs en Render si no llega."
 
 # --- SCHEDULER ---
 scheduler = BackgroundScheduler(daemon=True)
