@@ -2,9 +2,10 @@ import os
 import json
 import threading
 import requests
+import asyncio
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 from supabase import create_client, Client
 from openai import OpenAI
 
@@ -99,38 +100,40 @@ def evaluar_con_llm(descripcion):
         print(f"Error en OpenRouter: {e}")
         return False, "Error de API"
 
-def buscar_propiedades():
-    print("--- Iniciando patrullaje AUTOMÁTICO con Playwright ---")
+async def motor_scraping_asincrono():
+    """Motor asíncrono aislado para evitar bloqueos en los hilos de fondo."""
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
-            context = browser.new_context(
+        async with async_playwright() as p:
+            print("Lanzando Chromium...")
+            browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'])
+            context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
-            page = context.new_page()
+            page = await context.new_page()
             
             for url in ZONAS_OBJETIVO:
                 print(f"Escaneando URL: {url}")
                 try:
                     selector_links, selector_desc = obtener_selectores(url)
-                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                     
-                    enlaces = page.eval_on_selector_all(
+                    enlaces = await page.eval_on_selector_all(
                         selector_links, 
                         "elements => elements.map(e => e.href)"
                     )
                     print(f"Enlaces encontrados: {len(enlaces)}")
                     
-                    for link in enlaces[:5]: # Lote de control por ciclo
+                    for link in enlaces[:5]: # Lote de control
                         link_limpio = link.split('#')[0].split('?')[0]
                         if url_ya_vista(link_limpio):
                             continue
                             
                         print(f"Analizando propiedad nueva: {link_limpio}")
-                        page.goto(link_limpio, wait_until="domcontentloaded", timeout=20000)
+                        await page.goto(link_limpio, wait_until="domcontentloaded", timeout=20000)
                         
-                        if page.locator(selector_desc).count() > 0:
-                            descripcion = "\n".join(page.locator(selector_desc).all_inner_texts())
+                        if await page.locator(selector_desc).count() > 0:
+                            textos = await page.locator(selector_desc).all_inner_texts()
+                            descripcion = "\n".join(textos)
                         else:
                             descripcion = "Sin descripción visible en el DOM."
                         
@@ -149,11 +152,16 @@ def buscar_propiedades():
                 except Exception as inner_e:
                     print(f"Error procesando la zona {url}: {inner_e}")
                     
-            context.close()
-            browser.close()
-        print("--- PATRULLAJE FINALIZADO CON ÉXITO ---")
+            await context.close()
+            await browser.close()
     except Exception as e:
-        print(f"Error CRÍTICO en buscar_propiedades: {e}")
+        print(f"Error CRÍTICO en el navegador: {e}")
+
+def buscar_propiedades():
+    print("--- Iniciando patrullaje AUTOMÁTICO con Playwright ---")
+    # Forzamos la ejecución asíncrona dentro de este hilo específico
+    asyncio.run(motor_scraping_asincrono())
+    print("--- PATRULLAJE FINALIZADO CON ÉXITO ---")
 
 # --- RUTAS FLASK ---
 @app.route('/')
@@ -164,7 +172,7 @@ def home():
 def prueba_telegram():
     enviar_telegram("🤖 Ping de diagnóstico: Telegram conectado correctamente.")
     threading.Thread(target=buscar_propiedades).start()
-    return "PRUEBA LANZADA. Revisa los logs en Render si no llega."
+    return "PRUEBA LANZADA. Revisa los logs en Render."
 
 # --- SCHEDULER ---
 scheduler = BackgroundScheduler(daemon=True)
