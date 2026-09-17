@@ -25,6 +25,9 @@ llm_client = OpenAI(
 
 ZONAS_OBJETIVO = [
     "https://inmuebles.mercadolibre.com.mx/casas/renta/estado-de-mexico/tepotzotlan/_PriceRange_0-7500",
+    "https://www.inmuebles24.com/departamentos-en-renta-en-atizapan-de-zaragoza-hasta-7500-pesos.html",
+    "https://www.lamudi.com.mx/queretaro/san-juan-del-rio/departamento/for-rent/price:up-to-7500/",
+    "https://inmuebles.mercadolibre.com.mx/casas/renta/estado-de-mexico/tepotzotlan/_PriceRange_0-7500",
     "https://inmuebles.mercadolibre.com.mx/departamentos/renta/estado-de-mexico/atizapan-de-zaragoza/_PriceRange_0-7500",
     "https://inmuebles.mercadolibre.com.mx/casas/renta/queretaro/san-juan-del-rio/_PriceRange_0-7500"
 ]
