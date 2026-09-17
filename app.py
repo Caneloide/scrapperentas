@@ -32,6 +32,79 @@ ZONAS_OBJETIVO = [
     "https://inmuebles.mercadolibre.com.mx/casas/renta/queretaro/san-juan-del-rio/_PriceRange_0-7500"
 ]
 
+def obtener_selectores(url):
+    """Devuelve la tupla (selector_enlaces, selector_descripcion) según el dominio."""
+    if "mercadolibre.com" in url:
+        return ("a.ui-search-link", "p.ui-pdp-description__content")
+    
+    elif "inmuebles24.com" in url:
+        # Usamos atributos de datos (data-qa) porque I24 ofusca sus clases CSS
+        return ("div[data-qa='posting'] a, a.go-to-posting", "div#longDescription, div[data-qa='posting-description']")
+    
+    elif "lamudi.com" in url:
+        return ("a.js-listing-link, a.ListingCell-moreInfo-button", "div.ViewText-description, div#description")
+    
+    # Fallback genérico
+    return ("a", "p")
+
+def buscar_propiedades():
+    print("Iniciando patrullaje multi-plataforma con Playwright...")
+    with sync_playwright() as p:
+        # Lanzamos Chromium. En Inmuebles24 a veces ayuda añadir un user_agent específico para no parecer un bot.
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
+        
+        for url in ZONAS_OBJETIVO:
+            try:
+                # Obtenemos las reglas del DOM para esta página en específico
+                selector_links, selector_desc = obtener_selectores(url)
+                
+                # Navegamos al listado
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                
+                # Extraemos los enlaces evaluando el selector dinámico
+                enlaces = page.eval_on_selector_all(
+                    selector_links, 
+                    "elements => elements.map(e => e.href)"
+                )
+                
+                for link in enlaces:
+                    # Limpiamos anclas basura de la URL
+                    link_limpio = link.split('#')[0].split('?')[0] 
+                    
+                    if url_ya_vista(link_limpio):
+                        continue
+                        
+                    # Navegamos a la propiedad individual
+                    page.goto(link_limpio, wait_until="domcontentloaded", timeout=20000)
+                    
+                    # Extraer texto de descripción
+                    if page.locator(selector_desc).count() > 0:
+                        # Unimos el texto si hay varios párrafos bajo el mismo selector
+                        descripcion = "\n".join(page.locator(selector_desc).all_inner_texts())
+                    else:
+                        descripcion = "Sin descripción visible en el DOM."
+                    
+                    # Evaluamos con LLaMA 3 vía OpenRouter
+                    es_viable, razon = evaluar_con_llm(descripcion)
+                    
+                    if es_viable:
+                        zona_nombre = url.split('/')[-2].replace('-', ' ').title()
+                        mensaje = f"✅ Propiedad Viable\n📍 {zona_nombre}\n🧠 {razon}\n🔗 {link_limpio}"
+                        enviar_telegram(mensaje)
+                    
+                    # Registramos en Supabase
+                    marcar_como_vista(link_limpio)
+                    
+            except Exception as e:
+                print(f"Error procesando {url}: {e}")
+                
+        context.close()
+        browser.close()
+
 def enviar_telegram(mensaje):
     if not TOKEN or not CHAT_ID:
         print("Error: Faltan credenciales de Telegram")
