@@ -3,6 +3,7 @@ import json
 import threading
 import requests
 import asyncio
+import subprocess
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 from playwright.async_api import async_playwright
@@ -87,7 +88,7 @@ def evaluar_con_llm(descripcion):
     """
     try:
         response = llm_client.chat.completions.create(
-            model="meta-llama/llama-3.1-8b-instruct:free",
+            model="google/gemma-2-9b-it:free", # Actualizado a un modelo gratuito, potente y estable
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0
         )
@@ -123,7 +124,7 @@ async def motor_scraping_asincrono():
                     )
                     print(f"Enlaces encontrados: {len(enlaces)}")
                     
-                    for link in enlaces[:5]: # Lote de control
+                    for link in enlaces[:5]: 
                         link_limpio = link.split('#')[0].split('?')[0]
                         if url_ya_vista(link_limpio):
                             continue
@@ -159,6 +160,11 @@ async def motor_scraping_asincrono():
 
 def buscar_propiedades():
     print("--- Iniciando patrullaje AUTOMÁTICO con Playwright ---")
+    
+    # Blindaje contra la amnesia de Render: Fuerza la instalación de Chromium si no existe
+    print("Verificando dependencias del navegador en el sistema...")
+    subprocess.run(["playwright", "install", "chromium"], check=False)
+    
     # Forzamos la ejecución asíncrona dentro de este hilo específico
     asyncio.run(motor_scraping_asincrono())
     print("--- PATRULLAJE FINALIZADO CON ÉXITO ---")
